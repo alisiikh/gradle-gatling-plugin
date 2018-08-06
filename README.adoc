@@ -1,10 +1,13 @@
 = Gatling Plugin for Gradle
-:gatlingToolVersion: 2.2.2
+:gatlingToolVersion: 2.3.1
+:scalaVersion: 2.12.3
 :toc: macro
 
-image:http://gatling.io/images/gatling-logo.png[Gatling, 100, 90, link="http://gatling.io/"]
+image:https://gatling.io/wp-content/uploads/2017/02/Gatling-logo.png[Gatling,link="http://gatling.io/"]
 
-*Master branch* image:https://api.travis-ci.org/lkishalmi/gradle-gatling-plugin.svg?branch=master["Build Status", link="https://travis-ci.org/lkishalmi/gradle-gatling-plugin"]
+image:https://api.travis-ci.org/lkishalmi/gradle-gatling-plugin.svg?branch=master["Build Status", link="https://travis-ci.org/lkishalmi/gradle-gatling-plugin"]
+
+image:https://img.shields.io/gitter/room/nwjs/nw.js.svg["Gitter",link="https://gitter.im/gradle-gatling-plugin/Lobby"]
 
 toc::[]
 
@@ -70,22 +73,21 @@ The plugin defines the following extension properties in the `gatling` closure
 |toolVersion        |String         |'{gatlingToolVersion}'                     |`Gatling` version
 |logLevel           |String         |'WARN'
 |The default Gatling console log level if no `logback.xml` present in the configutation folder
-
+|scalaVersion       |String         |'{scalaVersion}'                           |`scala` version that fits your `Gatling` tool version
 |jvmArgs
 |List<String>
 |[source,groovy]
 ----
-['-server', '-XX:+UseThreadPriorities',
-'-XX:ThreadPriorityPolicy=42',
-'-Xms512M', '-Xmx512M', '-Xmn100M',
-'-XX:+HeapDumpOnOutOfMemoryError',
-'-XX:+AggressiveOpts',
+['-server', '-Xmx1G',
+'-XX:+UseG1GC', '-XX:MaxGCPauseMillis=30', 
+'-XX:G1HeapRegionSize=16m',
+'-XX:InitiatingHeapOccupancyPercent=75', 
+'-XX:+ParallelRefProcEnabled', 
+'-XX:+PerfDisableSharedMem', 
+'-XX:+AggressiveOpts', 
 '-XX:+OptimizeStringConcat',
-'-XX:+UseFastAccessorMethods',
-'-XX:+UseParNewGC',
-'-XX:+UseConcMarkSweepGC',
-'-XX:+CMSParallelRemarkEnabled',
-'-Djava.net.preferIPv4Stack=true',
+'-XX:+HeapDumpOnOutOfMemoryError', 
+'-Djava.net.preferIPv4Stack=true', 
 '-Djava.net.preferIPv6Addresses=false']
 ----
 | Additional arguments passed to JVM when executing `Gatling` simulations
@@ -100,6 +102,34 @@ The plugin defines the following extension properties in the `gatling` closure
 If closure then https://docs.gradle.org/current/userguide/working_with_files.html[See Gradle docs] for details,
 otherwise an Iterable of simulations fully qualified names.
 |===
+
+=== Custom source folder
+
+If you have a special layout you can configure the source root folder and all gatling specific folders.
+Currently you have to set the source sets accordingly.
+
++
+[source,groovy]
+----
+project.sourceSets {
+    gatling {
+        scala.srcDirs = ['src/test/gatling']
+        resources.srcDirs = ['src/test/gatling/user-files/simulations', 'src/test/gatling/user-files/data', 'src/test/gatling/user-files/body', 'src/test/gatling/conf']
+    }
+}
+
+gatling {
+    sourceRoot = 'src/test/gatling'
+    simulationsDir = 'user-files/simulations' <1>
+    dataDir = 'user-files/data' <2>
+    bodiesDir = 'user-files/bodies' <3>
+    confDir = 'conf' <4>
+}
+----
+<1> the plugin looks for simulations in `src/test/gatling/user-files/simulations`
+<2> data is located in `src/test/gatling/user-files/data`
+<3> request bodies are be placed in `src/test/gatling/user-files/bodies`
+<4> gatling configuration is located in `src/test/gatling/conf`
 
 === Examples
 
@@ -226,3 +256,51 @@ Run all simulations::
 Run single simulation implemented in `com.project.simu.MySimulation` class::
 +
   $ gradle gatlingRun-com.project.simu.MySimulation
+
+== Troubleshooting and known issues
+
+=== Spring Boot and Netty version
+
+https://github.com/lkishalmi/gradle-gatling-plugin/issues/53[Original issue]
+
+Caused by `io.spring.dependency-management` plugin and Spring platform BOM files.
+The dependency management plugin ensures that all declared dependencies have exactly the same versions as declared in BOM.
+Since `Spring Boot` declares own `Netty` version (e.g. `4.1.22.Final`) - this version is applied globally 
+for all the configurations of the `Gradle` project, even if configuration doesn't use `Spring`.
+
+There's 2 ways of solving the problem, depending on the actual usage of `Netty` in the project
+
+* When production code doesn't rely on `Netty`
+
+[source]
+.build.gradle
+----
+ext['netty.version'] = '4.0.51.Final'
+----
+
+This declares `Netty` version globally for all transitive dependencies in your project, including `Spring`.
+
+* When production code uses `Netty`
+
+[source]
+.build.gradle
+----
+dependencyManagement {
+    gatling {
+        dependencies {
+            dependencySet(group: 'io.netty', version: '4.0.51.Final') {
+               entry 'netty-codec-http'
+               entry 'netty-codec'
+               entry 'netty-handler'
+               entry 'netty-buffer'
+               entry 'netty-transport'
+               entry 'netty-common'
+               entry 'netty-transport-native-epoll'
+            }
+        }
+    }
+}
+----
+
+This options ensures that `4.0.51.Final` will be used only for `gatling` configurations, leaving other dependencies unchanged.
+
